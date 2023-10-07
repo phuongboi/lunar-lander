@@ -10,7 +10,8 @@
 #### Lunar lander v2
 * Solve lunar lander problem from openai Gymnasium [2] use Q-learning.
 * Periodly update q_target network parameter [4]
-
+* Use softmax policy instead of epsilon greedy policy
+* Multiple training step from replay memory
 
 ### Reference
 * [1] https://github.com/fakemonk1/Reinforcement-Learning-Lunar_Lander
