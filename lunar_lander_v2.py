@@ -7,6 +7,7 @@ import torch
 from torch import nn
 from matplotlib import pyplot as plt
 import pickle
+from copy import deepcopy
 
 class Network(nn.Module):
     def __init__(self, num_states, num_actions):
@@ -26,7 +27,7 @@ class Network(nn.Module):
 
 
 class DQN:
-    def __init__(self, env, lr, gamma, epsilon, epsilon_decay):
+    def __init__(self, env, lr, gamma, tau, batch_size, num_replays, max_memory):
 
         self.env = env
         self.action_space = env.action_space
@@ -35,13 +36,13 @@ class DQN:
 
         self.lr = lr
         self.gamma = gamma
-        self.epsilon = epsilon
-        self.epsilon_decay = epsilon_decay
+        self.tau = tau
+        self.batch_size = batch_size
+        self.num_replays = num_replays
+        self.max_memory = max_memory
         self.rewards_list = []
 
-        self.replay_buffer = deque(maxlen=500000)
-        self.batch_size = 64
-        self.epsilon_min = 0.01
+        self.replay_buffer = []#deque(maxlen=50000)
         self.num_actions = self.action_space.n
         self.num_states = env.observation_space.shape[0]
         self.model = self.make_model()
@@ -50,19 +51,19 @@ class DQN:
         model = Network(self.num_states, self.num_actions)
         return model
 
-    def e_greedy_policy(self, state):
-        # epsilon greedy policy
-        if np.random.rand() < self.epsilon:
-            action = random.randrange(self.num_actions)
-        else:
-            q_value = self.model(torch.from_numpy(state))
-            #print(q_value.shape)
-            action = np.argmax(q_value.detach().numpy())
-        return action
+    # def e_greedy_policy(self, state):
+    #     # epsilon greedy policy
+    #     if np.random.rand() < self.epsilon:
+    #         action = random.randrange(self.num_actions)
+    #     else:
+    #         q_value = self.model(torch.from_numpy(state))
+    #         #print(q_value.shape)
+    #         action = np.argmax(q_value.detach().numpy())
+    #     return action
 
-    def softmax_policy(self, state, tau=1.0):
+    def softmax_policy(self, state):
         q_value = self.model(torch.from_numpy(state))
-        preferences =  q_value.detach().numpy() / tau
+        preferences =  q_value.detach().numpy() / self.tau
         max_preferences = np.max(preferences)
         exp_preferences = np.exp(preferences - max_preferences)
         action_probs = exp_preferences / np.sum(exp_preferences)
@@ -72,6 +73,8 @@ class DQN:
 
 
     def add_to_replay_buffer(self, state, action, reward, next_state, terminal):
+        if len(self.replay_buffer) == self.max_memory:
+            del self.replay_buffer[0]
         self.replay_buffer.append((state, action, reward, next_state, terminal))
 
     def sample_from_reply_buffer(self):
@@ -86,7 +89,7 @@ class DQN:
         terminals = np.array([i[4] for i in random_sample])
         return torch.from_numpy(states), torch.from_numpy(actions), rewards, torch.from_numpy(next_states), terminals
 
-    def train_with_relay_buffer(self):
+    def train_with_relay_buffer(self, current_model):
             # replay_memory_buffer size check
         if len(self.replay_buffer) < self.batch_size:
             return
@@ -98,7 +101,7 @@ class DQN:
         sample = self.sample_from_reply_buffer()
         states, actions, rewards, next_states, terminals = self.get_memory(sample)
 
-        next_q_mat = self.model(next_states)
+        next_q_mat = current_model(next_states)
 
         next_q_vec = np.max(next_q_mat.detach().numpy(), axis=1).squeeze()
 
@@ -111,21 +114,21 @@ class DQN:
         loss.backward()
         self.optimizer.step()
 
-    def update_counter(self):
-        self.counter += 1
-        step_size = 5
-        self.counter = self.counter % step_size
+    # def update_counter(self):
+    #     self.counter += 1
+    #     step_size = 5
+    #     self.counter = self.counter % step_size
 
 
     def train(self, num_episodes=2000, can_stop=True):
         self.model.train()
         self.loss_func = nn.MSELoss()
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
-        #num_relays = 4
+
         for episode in range(num_episodes):
             state = env.reset()
             reward_for_episode = 0
-            num_steps = 1000
+            num_steps = 500
             state = state[0]
             for step in range(num_steps):
                 env.render()
@@ -140,24 +143,26 @@ class DQN:
                 # add up rewards
                 reward_for_episode += reward
                 state = next_state
-                self.update_counter()
-
-                self.train_with_relay_buffer()
+                #self.update_counter()
+                current_model = deepcopy(self.model)
+                for relay_step in range(self.num_replays):
+                    self.train_with_relay_buffer(current_model)
 
                 if terminal:
+                    print("break")
                     break
             self.rewards_list.append(reward_for_episode)
 
             # Decay the epsilon after each experience completion
-            if self.epsilon > self.epsilon_min:
-                self.epsilon *= self.epsilon_decay
+            # if self.epsilon > self.epsilon_min:
+            #     self.epsilon *= self.epsilon_decay
 
             # Check for breaking condition
             last_rewards_mean = np.mean(self.rewards_list[-100:])
             if last_rewards_mean > 200 and can_stop:
                 print("DQN Training Complete...")
                 break
-            print(episode, "\t: Episode || Reward: ",reward_for_episode, "\t|| Average Reward: ",last_rewards_mean, "\t epsilon: ", self.epsilon )
+            print(episode, "\t: Episode || Reward: ",reward_for_episode, "\t|| Average Reward: ",last_rewards_mean)
 
     def save_model(self, path):
         torch.save(self.model.state_dict(), path)
@@ -209,35 +214,6 @@ def plot_df(df, chart_name, title, x_axis_label, y_axis_label):
     fig.savefig(chart_name)
 
 
-def plot_df2(df, chart_name, title, x_axis_label, y_axis_label):
-    df['mean'] = df[df.columns[0]].mean()
-    plt.rcParams.update({'font.size': 17})
-    plt.figure(figsize=(15, 8))
-    plt.close()
-    plt.figure()
-    # plot = df.plot(linewidth=1.5, figsize=(15, 8), title=title)
-    plot = df.plot(linewidth=1.5, figsize=(15, 8))
-    plot.set_xlabel(x_axis_label)
-    plot.set_ylabel(y_axis_label)
-    plt.ylim((0, 300))
-    plt.xlim((0, 100))
-    plt.legend().set_visible(False)
-    fig = plot.get_figure()
-    fig.savefig(chart_name)
-
-
-def plot_experiments(df, chart_name, title, x_axis_label, y_axis_label, y_limit):
-    plt.rcParams.update({'font.size': 17})
-    plt.figure(figsize=(15, 8))
-    plt.close()
-    plt.figure()
-    plot = df.plot(linewidth=1, figsize=(15, 8), title=title)
-    plot.set_xlabel(x_axis_label)
-    plot.set_ylabel(y_axis_label)
-    plt.ylim(y_limit)
-    fig = plot.get_figure()
-    fig.savefig(chart_name)
-
 if __name__ == "__main__":
     env = gym.make('LunarLander-v2')
 
@@ -247,12 +223,15 @@ if __name__ == "__main__":
 
     # setting up params
     lr = 0.001
-    epsilon = 1.0
-    epsilon_decay = 0.995
+
     gamma = 0.99
-    training_episodes = 800
+    training_episodes = 600
+    tau = 0.001
+    batch_size = 8
+    max_memory = 50000
+    num_replays = 4
     print('St')
-    model = DQN(env, lr, gamma, epsilon, epsilon_decay)
+    model = DQN(env, lr, gamma, tau, batch_size, num_replays, max_memory)
     model.train(training_episodes, True)
 
     # Save Everything
