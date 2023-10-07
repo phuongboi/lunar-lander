@@ -5,7 +5,7 @@
 * Friendly and simple implementation with pytorch
 * Run `python lunar_lander_v1.py`
 ##### Training result
-![alt text](https://github.com/kytaithon/lunar-lander/blob/main/Figure%201:%20Reward%20for%20each%20training%20episode.png)
+![alt text](https://github.com/phuongboi/lunar-lander/blob/main/v1.png)
 
 #### Lunar lander v2
 * Solve lunar lander problem from openai Gymnasium [2] use Q-learning.
